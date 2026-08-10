@@ -5,10 +5,10 @@ from fastapi import FastAPI, Request, HTTPException, status, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from schemas import PostCreate, PostResponse, UserCreate, UserResponse
+from schemas import PostCreate, PostResponse, PostUpdate, UserCreate, UserResponse, UserUpdate
 from typing import Annotated
 from sqlalchemy import select
-from sqlalchemy.orm import Session  
+from sqlalchemy.orm import Session
 import models
 from database import Base, engine, get_db
 
@@ -32,78 +32,94 @@ templates = Jinja2Templates(directory="templates")
 # 1) Route to get all posts of a user from db
 @app.get("/", include_in_schema=False, name="home")
 @app.get("/posts", include_in_schema=False, name="posts")
-def home(request: Request, db: Annotated[Session , Depends(get_db)]):
+def home(request: Request, db: Annotated[Session, Depends(get_db)]):
     result = db.execute(select(models.Post))
     posts = result.scalars().all()
     return templates.TemplateResponse(
         request,
         "home.html",
         {
-            "posts": posts, 
+            "posts": posts,
             "title": "Home"
         },
     )
 # 2) Route to get a single post
 @app.get("/posts/{post_id}", include_in_schema=False)
-def post_page(request: Request, post_id: int, db: Annotated[Session , Depends(get_db)]):
-    result = db.execute(select(models.Post).where(models.Post.id == post_id))
+def post_page(
+    request: Request,
+    post_id: int,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.Post).where(models.Post.id == post_id)
+    )
     post = result.scalars().first()
     if post:
         title = post.title[:50]
+
         return templates.TemplateResponse(
             request,
             "post.html",
             {
-                "post": post, 
+                "post": post,
                 "title": title
             },
         )
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, 
+        status_code=status.HTTP_404_NOT_FOUND,
         detail="Post not found"
     )
-# 3) Route to veiw specific user post
+# 3) Route to view specific user post
 @app.get("/users/{user_id}/posts", include_in_schema=False, name="user_posts")
 def user_posts_page(
     request: Request,
     user_id: int,
-    db: Annotated[Session , Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
-    result = db.execute(select(models.User).where(models.User.id == user_id))
+    result = db.execute(
+        select(models.User).where(models.User.id == user_id)
+    )
     user = result.scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-    result = db.execute(select(models.Post).where(models.Post.user_id == user_id))
+    result = db.execute(
+        select(models.Post).where(models.Post.user_id == user_id)
+    )
     posts = result.scalars().all()
     return templates.TemplateResponse(
         request,
         "user_posts.html",
         {
-            "posts": posts, 
-            "user": user, 
+            "posts": posts,
+            "user": user,
             "title": f"{user.username}'s Posts"
         },
     )
 
+
+
 # ==========================
 # API Routes (Swagger UI)
 # ==========================
-# These routes return JSON data and appear in the Swagger documentation.
 # 1) Route to create user with details
 @app.post(
     "/api/users",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
+def create_user(
+    user: UserCreate,
+    db: Annotated[Session, Depends(get_db)]
+):
     # Checking user name
     result = db.execute(
         select(models.User).where(models.User.username == user.username),
     )
     existing_user = result.scalars().first()
+
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -121,16 +137,19 @@ def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
         )
     # If user name and e-mail doesn't exist create one
     new_user = models.User(
-        username = user.username,
-        email = user.email,
+        username=user.username,
+        email=user.email,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user
-# Route to get a user from db
+# 2) Route to get a user from db
 @app.get("/api/users/{user_id}", response_model=UserResponse)
-def get_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
+def get_user(
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)]
+):
     result = db.execute(
         select(models.User).where(models.User.id == user_id),
     )
@@ -141,9 +160,33 @@ def get_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
         status_code=status.HTTP_404_NOT_FOUND,
         detail="User not found !",
     )
+# 3) Route to get all posts of a specific user
 @app.get("/api/users/{user_id}/posts", response_model=list[PostResponse])
-# Route to get all posts of a specific user
-def get_user_posts(user_id: int, db: Annotated[Session , Depends(get_db)]):
+def get_user_posts(
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.User).where(models.User.id == user_id)
+    )
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    result = db.execute(
+        select(models.Post).where(models.Post.user_id == user_id)
+    )
+    posts = result.scalars().all()
+    return posts
+# Route to update an user
+@app.patch("/api/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
     result = db.execute(select(models.User).where(models.User.id == user_id))
     user = result.scalars().first()
     if not user:
@@ -151,23 +194,68 @@ def get_user_posts(user_id: int, db: Annotated[Session , Depends(get_db)]):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-    result = db.execute(select(models.Post).where(models.Post.user_id == user_id))
-    posts = result.scalars().all()
-    return posts
-# 2) Route to retrieve all posts
+    if user_update.username is not None and user_update.username != user.username:
+        result = db.execute(
+            select(models.User).where(models.User.username == user_update.username),
+        )
+        existing_user = result.scalars().first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists",
+            )
+    if user_update.email is not None and user_update.email != user.email:
+        result = db.execute(
+            select(models.User).where(models.User.email == user_update.email),
+        )
+        existing_email = result.scalars().first()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+    if user_update.username is not None:
+        user.username = user_update.username
+    if user_update.email is not None:
+        user.email = user_update.email
+    if user_update.image_file is not None:
+        user.image_file = user_update.image_file
+    db.commit()
+    db.refresh(user)
+    return user
+# Route to delete an user
+@app.delete("/api/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(models.User).where(models.User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    db.delete(user)
+    db.commit()
+# 4) Route to retrieve all posts
 @app.get("/api/posts", response_model=list[PostResponse])
-def get_posts(db: Annotated[Session , Depends(get_db)]):
+def get_posts(db: Annotated[Session, Depends(get_db)]):
     result = db.execute(select(models.Post))
     posts = result.scalars().all()
+
     return posts
-# 3) This route is used to create a post
+# 5) This route is used to create a post
 @app.post(
     "/api/posts",
     response_model=PostResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_post(post: PostCreate, db: Annotated[Session , Depends(get_db)]):
-    result = db.execute(select(models.User).where(models.User.id == post.user_id))
+def create_post(
+    post: PostCreate,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.User).where(models.User.id == post.user_id)
+    )
     user = result.scalars().first()
     if not user:
         raise HTTPException(
@@ -183,21 +271,121 @@ def create_post(post: PostCreate, db: Annotated[Session , Depends(get_db)]):
     db.commit()
     db.refresh(new_post)
     return new_post
-# 3) Route to retrieve a single post by its ID
+# 6) Route to retrieve a single post by its ID
 @app.get("/api/posts/{post_id}", response_model=PostResponse)
-def get_post(post_id: int, db: Annotated[Session , Depends(get_db)]):
-    result = db.execute(select(models.Post).where(models.Post.id == post_id))
+def get_post(
+    post_id: int,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.Post).where(models.Post.id == post_id)
+    )
     post = result.scalars().first()
     if post:
         return post
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, 
+        status_code=status.HTTP_404_NOT_FOUND,
         detail="Post not found"
     )
+# To update anything we have 2 methods: PUT and PATCH.
+# PUT: Is used to update fully. Used to update whole endpoint.
+# PATCH: Is used to update partially. Used to update specific things in an endpoint.
+# 7) Route to update a single post by its ID fully
+@app.put("/api/posts/{post_id}", response_model=PostResponse)
+def update_post_full(
+    post_id: int,
+    post_data: PostCreate,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.Post).where(models.Post.id == post_id)
+    )
+    post = result.scalars().first()
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found",
+        )
+    if post_data.user_id != post.user_id:
+        result = db.execute(
+            select(models.User).where(
+                models.User.id == post_data.user_id
+            )
+        )
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found !"
+            )
+    post.title = post_data.title
+    post.content = post_data.content
+    post.user_id = post_data.user_id
+    db.commit()
+    db.refresh(post)
+    return post
+# 8) Route to update a single post by its ID partially
+@app.patch("/api/posts/{post_id}", response_model=PostResponse)
+def update_post_partial(
+    post_id: int,
+    post_data: PostUpdate,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.Post).where(models.Post.id == post_id)
+    )
+    post = result.scalars().first()
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found",
+        )
+    update_data = post_data.model_dump(exclude_unset=True)
+    if "user_id" in update_data:
+        result = db.execute(
+            select(models.User).where(
+                models.User.id == update_data["user_id"]
+            )
+        )
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found!"
+            )
+    for field, value in update_data.items():
+        setattr(post, field, value)
+    db.commit()
+    db.refresh(post)
+    return post
+# 9) Route to delete a post
+@app.delete(
+    "/api/posts/{post_id}",
+    status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_post(
+    post_id: int,
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = db.execute(
+        select(models.Post).where(models.Post.id == post_id)
+    )
+    post = result.scalars().first()
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found !"
+        )
+    db.delete(post)
+    db.commit()
 
 
+# Handling exceptions
 @app.exception_handler(StarletteHTTPException)
-def general_http_exception_handler(request: Request, exception: StarletteHTTPException):
+def general_http_exception_handler(
+    request: Request,
+    exception: StarletteHTTPException
+):
     message = (
         exception.detail
         if exception.detail
@@ -209,6 +397,7 @@ def general_http_exception_handler(request: Request, exception: StarletteHTTPExc
             status_code=exception.status_code,
             content={"detail": message},
         )
+
     return templates.TemplateResponse(
         request,
         "error.html",
@@ -222,20 +411,24 @@ def general_http_exception_handler(request: Request, exception: StarletteHTTPExc
     )
 
 @app.exception_handler(RequestValidationError)
-def validation_exception_handler(request: Request, exception: RequestValidationError):
+def validation_exception_handler(
+    request: Request,
+    exception: RequestValidationError
+):
     if request.url.path.startswith("/api"):
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": exception.errors()},
         )
+
     return templates.TemplateResponse(
         request,
         "error.html",
         {
             "request": request,
-            "status_code": status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "title": status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "status_code": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "title": status.HTTP_422_UNPROCESSABLE_ENTITY,
             "message": "Invalid request. Please check your input and try again.",
         },
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
